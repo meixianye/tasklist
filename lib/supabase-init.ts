@@ -90,7 +90,7 @@ export async function insertInitialData(): Promise<{
 
     // 插入任务阶段
     const { error: sectionsError } = await supabase.from("task_sections").insert([
-      { id: "phase1", title: "第一阶段：准备与规划", order_index: 1 },
+      { id: "phase1", title: "第一阶段：准备和规划", order_index: 1 },
       { id: "phase2", title: "第二阶段：数据收集", order_index: 2 },
       { id: "phase3", title: "第三阶段：分析与撰写", order_index: 3 },
     ])
@@ -219,7 +219,7 @@ ALTER TABLE tasks DISABLE ROW LEVEL SECURITY;
 
 -- 插入初始数据
 INSERT INTO task_sections (id, title, order_index) VALUES
-  ('phase1', '第一阶段：准备与规划', 1),
+  ('phase1', '第一阶段：准备和规划', 1),
   ('phase2', '第二阶段：数据收集', 2),
   ('phase3', '第三阶段：分析与撰写', 3)
 ON CONFLICT (id) DO UPDATE SET

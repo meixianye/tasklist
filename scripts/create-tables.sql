@@ -30,7 +30,7 @@ ALTER TABLE tasks DISABLE ROW LEVEL SECURITY;
 
 -- 插入初始数据
 INSERT INTO task_sections (id, title, order_index) VALUES
-  ('phase1', '第一阶段：准备与规划', 1),
+  ('phase1', '第一阶段：准备和规划', 1),
   ('phase2', '第二阶段：数据收集', 2),
   ('phase3', '第三阶段：分析与撰写', 3)
 ON CONFLICT (id) DO UPDATE SET

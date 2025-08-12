@@ -112,7 +112,7 @@ export default function TaskList() {
     const defaultSections: TaskSectionWithTasks[] = [
       {
         id: "phase1",
-        title: "第一阶段：准备与规划",
+        title: "第一阶段：准备和规划",
         order_index: 1,
         tasks: [
           {
