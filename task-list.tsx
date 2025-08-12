@@ -7,37 +7,50 @@ import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { CheckCircle2, Cloud, CloudOff, Loader2, AlertCircle, Settings, Database } from "lucide-react"
+import { CheckCircle2, Cloud, CloudOff, Loader2, AlertCircle, Settings, Database, LogOut, User } from "lucide-react"
 import { supabase, isSupabaseConfigured, type TaskSection, type Task } from "./lib/supabase"
 import { testSupabaseConnection } from "./lib/supabase-test"
-import { checkTablesExist, insertInitialData } from "./lib/supabase-init"
+import { checkTablesExist } from "./lib/supabase-init"
 import { SQLScriptModal } from "./components/sql-script-modal"
+import { LoginForm } from "./components/login-form"
+import { RegisterForm } from "./components/register-form"
+import { getUserFromStorage, clearUserFromStorage, type User as UserType } from "./lib/auth"
 
 interface TaskSectionWithTasks extends TaskSection {
   tasks: Task[]
 }
 
 type ConnectionStatus = "not-configured" | "connecting" | "connected" | "error" | "needs-init"
+type AuthView = "login" | "register"
 
 export default function TaskList() {
+  const [currentUser, setCurrentUser] = useState<UserType | null>(null)
+  const [authView, setAuthView] = useState<AuthView>("login")
   const [taskSections, setTaskSections] = useState<TaskSectionWithTasks[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("not-configured")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isTestingConnection, setIsTestingConnection] = useState(false)
-  const [isInitializing, setIsInitializing] = useState(false)
   const [showSQLModal, setShowSQLModal] = useState(false)
 
-  // 检查Supabase配置并加载数据
+  // 检查用户登录状态
   useEffect(() => {
-    if (isSupabaseConfigured()) {
+    const user = getUserFromStorage()
+    if (user) {
+      setCurrentUser(user)
+    }
+    setIsLoading(false)
+  }, [])
+
+  // 当用户登录后，检查数据库并加载数据
+  useEffect(() => {
+    if (currentUser && isSupabaseConfigured()) {
       checkDatabaseAndLoad()
-    } else {
+    } else if (currentUser) {
       setConnectionStatus("not-configured")
-      setIsLoading(false)
       loadDefaultTasks()
     }
-  }, [])
+  }, [currentUser])
 
   const checkDatabaseAndLoad = async () => {
     try {
@@ -46,7 +59,7 @@ export default function TaskList() {
       setError(null)
 
       // 首先检查表是否存在
-      const { tablesExist, missingTables, details } = await checkTablesExist()
+      const { tablesExist, missingTables } = await checkTablesExist()
 
       if (!tablesExist) {
         setConnectionStatus("needs-init")
@@ -55,8 +68,8 @@ export default function TaskList() {
         return
       }
 
-      // 表存在，尝试加载数据
-      await loadTasksFromSupabase()
+      // 表存在，尝试加载用户数据
+      await loadUserTasksFromSupabase()
     } catch (err) {
       console.error("检查数据库时出错:", err)
       setError(err instanceof Error ? err.message : "未知错误")
@@ -67,14 +80,14 @@ export default function TaskList() {
     }
   }
 
-  const loadTasksFromSupabase = async () => {
-    if (!supabase) return
+  const loadUserTasksFromSupabase = async () => {
+    if (!supabase || !currentUser) return
 
     try {
       setConnectionStatus("connecting")
       setError(null)
 
-      // 加载任务阶段
+      // 加载任务阶段（公共数据）
       const { data: sections, error: sectionsError } = await supabase
         .from("task_sections")
         .select("*")
@@ -84,8 +97,12 @@ export default function TaskList() {
         throw new Error(`加载阶段失败: ${sectionsError.message}`)
       }
 
-      // 加载任务
-      const { data: tasks, error: tasksError } = await supabase.from("tasks").select("*").order("order_index")
+      // 加载用户专属任务
+      const { data: tasks, error: tasksError } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("user_id", currentUser.id)
+        .order("order_index")
 
       if (tasksError) {
         throw new Error(`加载任务失败: ${tasksError.message}`)
@@ -198,6 +215,25 @@ export default function TaskList() {
     setTaskSections(defaultSections)
   }
 
+  // 处理登录成功
+  const handleLoginSuccess = (user: UserType) => {
+    setCurrentUser(user)
+  }
+
+  // 处理注册成功
+  const handleRegisterSuccess = (user: UserType) => {
+    setCurrentUser(user)
+  }
+
+  // 处理登出
+  const handleLogout = () => {
+    clearUserFromStorage()
+    setCurrentUser(null)
+    setTaskSections([])
+    setConnectionStatus("not-configured")
+    setError(null)
+  }
+
   // 计算总体完成进度
   const totalTasks = taskSections.reduce((sum, section) => sum + section.tasks.length, 0)
   const completedTasks = taskSections.reduce(
@@ -221,7 +257,7 @@ export default function TaskList() {
     setTaskSections(updatedSections)
 
     // 如果连接到Supabase，则保存到数据库
-    if (connectionStatus === "connected" && supabase) {
+    if (connectionStatus === "connected" && supabase && currentUser) {
       try {
         const task = updatedSections
           .find((section) => section.id === sectionId)
@@ -235,6 +271,7 @@ export default function TaskList() {
               updated_at: new Date().toISOString(),
             })
             .eq("id", taskId)
+            .eq("user_id", currentUser.id)
 
           if (error) {
             console.error("保存任务状态失败:", error)
@@ -304,45 +341,55 @@ export default function TaskList() {
     setIsTestingConnection(false)
   }
 
-  const handleInitializeDatabase = async () => {
-    setIsInitializing(true)
-    const result = await insertInitialData()
-
-    if (result.success) {
-      setError(null)
-      await loadTasksFromSupabase()
-    } else {
-      setError(result.message)
-    }
-    setIsInitializing(false)
-  }
-
   const handleSQLModalComplete = () => {
     setShowSQLModal(false)
     checkDatabaseAndLoad()
   }
 
+  // 如果正在加载，显示加载状态
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">加载任务列表中...</p>
+          <p className="text-gray-600">加载中...</p>
         </div>
       </div>
     )
   }
 
+  // 如果用户未登录，显示认证界面
+  if (!currentUser) {
+    if (authView === "login") {
+      return <LoginForm onLoginSuccess={handleLoginSuccess} onSwitchToRegister={() => setAuthView("register")} />
+    } else {
+      return <RegisterForm onRegisterSuccess={handleRegisterSuccess} onSwitchToLogin={() => setAuthView("login")} />
+    }
+  }
+
+  // 用户已登录，显示任务列表
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-4xl mx-auto">
-        {/* 页面标题和连接状态 */}
+        {/* 页面标题和用户信息 */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-3xl font-bold text-gray-900">任务列表</h1>
-            <div className="flex items-center gap-2 text-sm">
-              {getConnectionStatusIcon()}
-              <span className={`font-medium ${getConnectionStatusColor()}`}>{getConnectionStatusText()}</span>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">任务列表</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <User className="w-4 h-4 text-gray-500" />
+                <span className="text-sm text-gray-600">欢迎，{currentUser.username}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-sm">
+                {getConnectionStatusIcon()}
+                <span className={`font-medium ${getConnectionStatusColor()}`}>{getConnectionStatusText()}</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleLogout} className="bg-transparent">
+                <LogOut className="w-4 h-4 mr-1" />
+                退出登录
+              </Button>
             </div>
           </div>
 
@@ -380,21 +427,6 @@ export default function TaskList() {
                     <Button variant="outline" size="sm" onClick={() => setShowSQLModal(true)}>
                       <Database className="w-3 h-3 mr-1" />
                       运行SQL脚本
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleInitializeDatabase}
-                      disabled={isInitializing}
-                      className="bg-orange-600 hover:bg-orange-700"
-                    >
-                      {isInitializing ? (
-                        <>
-                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                          插入数据中...
-                        </>
-                      ) : (
-                        "插入初始数据"
-                      )}
                     </Button>
                   </div>
                 </div>
